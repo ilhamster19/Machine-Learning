@@ -1,0 +1,239 @@
+---
+title: "Pemodelan Credit Risk dengan Algoritma C5.0 (Decision Tree)"
+author: "Ilham Darussalam"
+date: "2023-01-17"
+output: 
+  html_document:
+    toc: True
+    toc_float: True
+---
+
+## Credit Risk
+
+Credit risk adalah resiko yang harus ditanggung oleh seorang individu atau lembaga ketika memberikan pinjaman (biasanya dalam bentuk uang) ke individu atau pihak lain. Resiko ini berupa tidak bisa dibayarkannya pokok dan bunga pinjaman, sehingga mengakibatkan kerugian berikut :
+
+-   Gangguan aliran kas (cash flow) sehingga modal kerja terganggu.
+
+-   Meningkatkan biaya operasional untuk mengejar pembayaran tersebut (collection).
+
+Untuk memperkecil resiko kredit ini, biasanya dilakukan proses yang disebut dengan credit scoring dan credit rating terhadap pihak peminjam. Output proses ini akan menjadi basis untuk menentukan apakah aplikasi pengajuan pinjaman baru diterima atau ditolak.
+
+## Algoritma C5.0
+
+C5.0 adalah algoritma klasifikasi yang digunakan untuk membuat model prediksi dengan data bertipe kategorik dan numerik. Algoritma ini diciptakan oleh Ross Quinlan dan merupakan pengembangan dari algoritma sebelumnya yaitu C4.5. C5.0 sendiri merupakan salah satu algoritma yang menggunakan teknik pembelajaran "Decision tree" untuk membuat keputusan dan model prediksi.
+
+C5.0 menggunakan teknik pemotongan (pruning) untuk menghindari overfitting pada data. Pruning adalah proses untuk menghapus pohon keputusan yang tidak penting atau tidak signifikan dari model. Ini membuat model lebih sederhana dan mudah dipahami, serta meningkatkan akurasi prediksi.
+
+## Import Library
+
+Pertama-tama, import library yang akan kita gunakan.
+
+    library(readxl)    #untuk membaca data excel
+    library(tidyverse) #untuk manipulasi data
+    library(C50)       #untuk menggunakan algoritma C5.0
+    library(reshape2)  #untuk menggunakan fungsi prediksi dcast()
+
+```{r include=FALSE}
+library(readxl)    #untuk membaca data excel
+library(tidyverse) #untuk manipulasi data
+library(C50)       #untuk menggunakan algoritma C5.0
+library(reshape2)  #untuk menggunakan fungsi prediksi dcast()
+```
+
+Jika belum tersedia pada environtmen R Anda, silahkan download terlebih dahulu dengan syntax berikut (pastikan terkoneksi dengan internet).
+
+    install.packages("readxl")
+    install.packages("tidyverse")
+    install.packages(C50)
+    install.packages("reshape2")
+
+## Import Dataset
+
+Dataset yang digunakan adalah data profil calon nasabah pinjaman yang bersumber dari website [dqlab.id](dqlab.id). Silahkan download dataset pada link berikut <https://github.com/ilhamster19/Training-Datasets/raw/main/Credit%20Score-dqlab.xlsx> . Selanjutnya, import dataset sesuai dengan direktori tempat menyimpan fille. Simpan data pada variabel 'datakredit' dan gunakan struktur data `tibble` agar lebih mudah melihat tipe data per kolom. Anda juga bisa menggunakan syntax `View()` untuk melihat dataset secara keseluruhan.
+
+    #Import dataset
+    datakredit = read_excel(
+      "DATA SCIENCE/Portofolio/Credit Risk Analysys/Credit Score.xlsx") %>%
+      as.tibble
+
+    datakredit
+    View(datakredit)
+
+```{r include=FALSE}
+datakredit = read_excel(
+  "C:/Users/ASUS/Documents/DATA SCIENCE/Dataset/Credit Score-dqlab.xlsx") %>%
+  as.tibble
+
+datakredit
+View(datakredit)
+```
+
+```{r echo=FALSE}
+datakredit
+```
+
+Dapat dilihat bahwa dataset memiliki dimensi 900 x 7 (900 baris dan 7 kolom) yang artinya terdapat 900 observasi dan 7 atribut.
+
+## Mempersiapkan Class dan Input Variable
+
+Class variable adalah variabel yang akan diprediksi sedangkan Input variable adalah variabel yang akan digunakan untuk memprediksi. Pada artikel ini class yang digunakan adalah `risk_rating` dengan input `jumlah_tanggungan` dan `durasi_pinjaman_bulan` dengan keterangan sebagai berikut :
+
+-   `risk_rating` : Credit Score untuk calon nasabah.
+
+-   `jumlah_tanggungan` : Jumlah anggota keluarga yang menjadi tanggungan calon nasabah.
+
+-   `durasi_pinjaman_bulan` : Durasi pinjaman oleh calon nasabah dalan hitungan bulan.
+
+Untuk class variable akan diubah menjadi tipe factor sebagai salah satu syarat melakukan pemodelan dengan algoritma C5.0 di R.
+
+```{r}
+class=datakredit$risk_rating %>% as.factor
+input=datakredit%>%select(jumlah_tanggungan,durasi_pinjaman_bulan)
+
+str(class)
+str(input)
+```
+
+## Menyiapkan Data Training dan Data Testing
+
+Pada pemodelan machine learning, dataset akan dibagi menjadi 2. Sebagian digunakan untuk training dan sisanya untuk testing. Pada artikel ini akan digunakan metode 80 : 20, artinya 80% data diambil secara acak untuk training dan 20% sisanya untuk testing.
+
+### Membuat Indeks Pengacakan
+
+Langkah pertama adalah menyiapkan indeks pengacakan. Hasil perintah `sample()` akan berbeda pada setiap komputer atau setiap kali dijalankan kembali. Jika Anda ingin berlatih dan menyeragamkan hasil acakan dengan artikel ini, Anda bisa menggunakan syntax `set.seed()`.
+
+```{r}
+set.seed(100) #untuk menyeragamkan hasil random antar komputer
+indeks_training = sample(900, 720) #ambil 720 sampel acak yg terdiri dari angka 1-900
+
+indeks_testing = c(1:900)
+indeks_testing = indeks_testing[-indeks_training]
+```
+
+Untuk memastikan hasil acakan telah valid, gunakan operator %in%. Jika hanya ada elemen `FALSE`, artinya indeks_training dan indeks_testing tidak memiliki elemen yang sama.
+
+```{r}
+indeks_testing %in% indeks_training %>% unique
+```
+
+### Membuat Data Training
+
+Data training digunakan untuk melatih model machine learning. Data training akan diambil dari `datakredit` dengan indeks `indeks_training` yang sudah dibuat sebelumnya.
+
+    input_training = input[indeks_training,]
+    input_training
+
+    class_training = class[indeks_training]
+    class_training
+
+```{r include=FALSE}
+input_training = input[indeks_training,]
+class_training = class[indeks_training]
+```
+
+### Membuat Data Testing
+
+    input_testing = input[indeks_testing,]
+    input_testing
+
+    class_testing = class[indeks_testing]
+    class_testing
+
+```{r include=FALSE}
+input_testing = input[indeks_testing,]
+class_testing = class[indeks_testing]
+```
+
+## Membuat dan Menginterpretasikan Model
+
+### Menampilkan Model
+
+```{r}
+model <- C5.0(input_training, class_training,
+              control = C5.0Control(label="Risk Rating"))
+summary(model)
+```
+
+### Interpretasi Model
+
+![](images/paste-B9C5D4DC.png)
+
+Bagian ini menjelaskan Decision Tree dalam bentuk teks. Penjelasan setiap bagiannya sebagai berikut :
+
+-   Warna Biru : Node dan Split Kondisinya
+
+-   Warna Merah : Leaf Node atau hasil klasifikasi
+
+-   Warna Ungu : Statistik klasifikasi berbanding kesalahan. Sebagai contoh pada bagian `: 4 (95/26)` artinya ada 95 data yang diklasifikasikan sebagai class 4 dan 26 data diantaranya salah klasifikasi.\
+    \
+
+    ![](images/paste-132A7C72.png)
+
+    Pada bagian ini menjelaskan bahwa decision tree yang dihasilkan memiliki 6 leaf node dan menghasilkan 173 prediksi salah (Error sebesar 24%). Artinya, secara umum model yang telah dibuat menghasilkan akurasi 76%.\
+    \
+
+    ![](images/paste-601DB25D.png)
+
+Pada Bagian ini menjelaskan confusion matrix. Heading kolom menyatakan prediksi model dan heading baris menyatakan class sebenarnya. Sebagai contoh :
+
+-   Pada indeks matriks `[1,1]` nilainya 164, artinya ada 164 class 1 sebenarnya yang diklasifikasikan model sebagai class 1.
+
+-   Pada indeks matriks `[1,2]` nilainya 2, artinya ada 2 class 1 sebenarnya yang diklasifikasikan model sebagai class 2.
+
+-   Pada indeks matriks `[2,1]` nilainya 73, artinya ada 73 class 2 sebenarnya yang diklasifikasikan model sebagai class 1.
+
+-   Pada indeks matriks `[2,2]` nilainya 26, artinya ada 26 class 2 sebenarnya yang diklasifikasikan model sebagai class 2.
+
+-   Dst.\
+    \
+
+![](images/paste-D8E78436.png)
+
+Pada bagian ini menjelaskan bahwa atribut `jumlah_tabungan` digunakan sebanyak 100% dan atribut `durasi_pinjaman_bulan` digunakan sebanyak 72.5% untuk menyusun model.\
+
+### Plot Model Decision Tree
+
+Untuk melihat Desicison Tree lebih jelas, gunakan syntax `plot()`.
+
+```{r}
+plot(model)
+```
+
+## Menguji Model dengan Data Testing
+
+Setelah mendapatkan model, kita akan menguji model dengan data testing yang sudah dibuat sebelumnya. Model akan digunakan untuk memprediksi class dari data testing, dimana hasil prediksi akan dibandingkan dengan class sebenarnya.
+
+### Hasil Prediksi vs Data Testing
+
+```{r}
+hasil_prediksi=predict(model, input_testing)
+compare=data.frame(input_testing,risk_rating=class_testing,hasil_prediksi,
+                   keterangan=(class_testing==hasil_prediksi))%>%as.tibble
+compare  
+summary(compare$keterangan)
+```
+
+Pada tabel di atas dapat dilihat bahwa model menghasilkan 148 prediksi benar dan 32 prediksi salah. Artinya, akurasi model mencapai 82% dalam memprediksi data testing.
+
+### Confusion Matrix
+
+Berikut hasil confusion matrix pengujian model dengan data testing.
+
+```{r}
+dcast(hasil_prediksi ~ class_testing, data=compare)
+```
+
+## Kesimpulan
+
+Hasil pemodelan jumlah tanggungan dan durasi pinjaman terhadap risk rating dengan menggunakan 100% atribut jumlah tanggungan dan 72,5% atribut durasi pinjaman menghasilkan akurasi sebesar 76%, sehingga cukup layak digunakan untuk memprediksi risk rating dari calon nasabah.\
+\
+\
+\
+Kunjungi saya :
+
+-   Youtube : [Ilham Darussalam](https://www.youtube.com/channel/UCeTIMXAXA503eoh9HiDxuDg)
+
+-   Github : [ilhamster19](https://github.com/ilhamster19)
+
+-   E-mail : ilham.rush19\@gmail.com\
+    \
